@@ -1,0 +1,9 @@
+### dotnet files ###
+
+obj/
+bin/
+TestResults/
+
+### private ###
+
+.private/
