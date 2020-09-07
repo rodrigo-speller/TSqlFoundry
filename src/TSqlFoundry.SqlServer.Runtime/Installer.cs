@@ -7,6 +7,7 @@ using System.Data.SqlClient;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Security.Cryptography;
 using Microsoft.SqlServer.Server;
 using TSqlFoundry.SqlServer.Runtime.SqlReflection;
 using TSqlFoundry.SqlServer.Runtime.TSqlDom;
@@ -73,10 +74,13 @@ namespace TSqlFoundry.SqlServer.Runtime
 
         private static SqlAssemblyInfo InstallAssembly(SqlConnection connection, Assembly assembly)
         {
-            var originalName = assembly.GetName().Name;
+            var assemblyName = assembly.GetName();
+            var originalName = assemblyName.Name;
             var name = originalName;
 
             var data = File.ReadAllBytes(assembly.Location);
+
+            var assemblyHash = SHA512.Create().ComputeHash(data, 0, data.Length);
             var sqlData = string.Join("", data.Select(x => x.ToString("X2")));
 
             int i = 0;
@@ -95,6 +99,20 @@ namespace TSqlFoundry.SqlServer.Runtime
 
                 name = $"{originalName}_{(++i).ToInvariantString()}";
             }
+
+            try 
+            {
+                connection.ExecuteNonQuery(
+                    "EXEC sys.sp_add_trusted_assembly @p_hash, @p_assembly_name",
+                    new SqlParameter("@p_hash", assemblyHash) {
+                        SqlDbType = SqlDbType.Binary,
+                        Size = 64
+                    },
+                    new SqlParameter("@p_assembly_name", assemblyName.FullName)
+                );
+            }
+            catch (SqlException ex) when (ex.ErrorCode == 10345 /* The assembly hash is already trusted */)
+            { }
 
             connection.ExecuteNonQuery($@"
                 CREATE ASSEMBLY {name.ToSqlIdentifier()}
